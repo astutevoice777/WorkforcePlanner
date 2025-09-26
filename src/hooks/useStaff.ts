@@ -1,7 +1,22 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useBusiness } from './useBusiness';
 import { useToast } from './use-toast';
+
+export type DayKey = 'monday' | 'tuesday' | 'wednesday' | 'thursday' | 'friday' | 'saturday' | 'sunday';
+
+export interface TimeSlot {
+  start: string; // HH:mm
+  end: string;   // HH:mm
+}
+
+export type Availability = Record<DayKey, TimeSlot[]>;
+
+export interface Constraints {
+  maxHoursPerDay: number;
+  maxHoursPerWeek: number;
+  minHoursBetweenShifts: number;
+}
 
 export interface Staff {
   id: string;
@@ -9,8 +24,10 @@ export interface Staff {
   name: string;
   email: string;
   phone: string;
-  availability: any;
-  constraints: any;
+  availability: Availability;
+  constraints: Constraints;
+  hourly_rate: number;
+  max_hours_per_week: number;
   is_active: boolean;
   created_at: string;
   updated_at: string;
@@ -24,7 +41,7 @@ export function useStaff() {
   const [loading, setLoading] = useState(false);
 
   // Fetch staff with their roles
-  const fetchStaff = async () => {
+  const fetchStaff = useCallback(async () => {
     if (!business) return;
     
     setLoading(true);
@@ -40,12 +57,15 @@ export function useStaff() {
 
       // Get staff roles for all staff members
       const staffIds = staffData?.map(s => s.id) || [];
-      const { data: rolesData, error: rolesError } = await supabase
-        .from('staff_roles')
-        .select('staff_id, role_id')
-        .in('staff_id', staffIds);
-
-      if (rolesError) throw rolesError;
+      let rolesData: { staff_id: string; role_id: string }[] | null = null;
+      if (staffIds.length > 0) {
+        const rolesResp = await supabase
+          .from('staff_roles')
+          .select('staff_id, role_id')
+          .in('staff_id', staffIds);
+        if (rolesResp.error) throw rolesResp.error;
+        rolesData = rolesResp.data as { staff_id: string; role_id: string }[] | null;
+      }
 
       // Combine staff with their roles
       const staffWithRoles = staffData?.map(staffMember => ({
@@ -54,8 +74,9 @@ export function useStaff() {
       })) || [];
 
       setStaff(staffWithRoles);
-    } catch (error: any) {
-      console.error('Error fetching staff:', error);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Error fetching staff:', message);
       toast({
         title: 'Error loading staff',
         description: 'Failed to load staff data',
@@ -64,7 +85,7 @@ export function useStaff() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [business, toast]);
 
   // Add new staff member
   const addStaff = async (staffData: Omit<Staff, 'id' | 'business_id' | 'created_at' | 'updated_at'>) => {
@@ -74,12 +95,14 @@ export function useStaff() {
       const { roles, ...staffPayload } = staffData;
       
       // Insert staff member
-      const { data: newStaff, error: staffError } = await supabase
+      const insertPayload = {
+        ...staffPayload,
+        business_id: business.id,
+      } as any; // availability/constraints are JSONB-compatible
+
+      const { data: newStaff, error: staffError } = await (supabase as any)
         .from('staff')
-        .insert({
-          ...staffPayload,
-          business_id: business.id,
-        })
+        .insert(insertPayload)
         .select()
         .single();
 
@@ -101,14 +124,15 @@ export function useStaff() {
 
       await fetchStaff();
       return { data: newStaff, error: null };
-    } catch (error: any) {
-      console.error('Error adding staff:', error);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Error adding staff:', message);
       toast({
         title: 'Error adding staff',
-        description: error.message,
+        description: message,
         variant: 'destructive',
       });
-      return { error };
+      return { error: message };
     }
   };
 
@@ -118,9 +142,11 @@ export function useStaff() {
       const { roles, ...staffPayload } = staffData;
       
       // Update staff member
-      const { data: updatedStaff, error: staffError } = await supabase
+      const updatePayload = staffPayload as any; // availability/constraints are JSONB-compatible
+
+      const { data: updatedStaff, error: staffError } = await (supabase as any)
         .from('staff')
-        .update(staffPayload)
+        .update(updatePayload)
         .eq('id', staffId)
         .select()
         .single();
@@ -152,14 +178,15 @@ export function useStaff() {
 
       await fetchStaff();
       return { data: updatedStaff, error: null };
-    } catch (error: any) {
-      console.error('Error updating staff:', error);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Error updating staff:', message);
       toast({
         title: 'Error updating staff',
-        description: error.message,
+        description: message,
         variant: 'destructive',
       });
-      return { error };
+      return { error: message };
     }
   };
 
@@ -175,14 +202,15 @@ export function useStaff() {
 
       await fetchStaff();
       return { error: null };
-    } catch (error: any) {
-      console.error('Error deleting staff:', error);
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      console.error('Error deleting staff:', message);
       toast({
         title: 'Error deleting staff',
-        description: error.message,
+        description: message,
         variant: 'destructive',
       });
-      return { error };
+      return { error: message };
     }
   };
 
@@ -190,7 +218,7 @@ export function useStaff() {
     if (business) {
       fetchStaff();
     }
-  }, [business]);
+  }, [business, fetchStaff]);
 
   return {
     staff,

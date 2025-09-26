@@ -40,6 +40,16 @@ export default function StaffManagement() {
     },
     is_active: true
   });
+  // Raw text state for availability inputs (so typing is smooth)
+  const [availabilityText, setAvailabilityText] = useState<Record<string, string>>({
+    monday: '',
+    tuesday: '',
+    wednesday: '',
+    thursday: '',
+    friday: '',
+    saturday: '',
+    sunday: ''
+  });
 
   const openAddDialog = () => {
     setEditingStaff(null);
@@ -63,6 +73,15 @@ export default function StaffManagement() {
         minHoursBetweenShifts: 12
       },
       is_active: true
+    });
+    setAvailabilityText({
+      monday: '',
+      tuesday: '',
+      wednesday: '',
+      thursday: '',
+      friday: '',
+      saturday: '',
+      sunday: ''
     });
     setIsDialogOpen(true);
   };
@@ -90,20 +109,65 @@ export default function StaffManagement() {
       },
       is_active: staffMember.is_active
     });
+    // Seed raw text from availability
+    const toText = (slots: any[] = []) => slots.map(s => `${s.start}-${s.end}`).join(', ');
+    setAvailabilityText({
+      monday: toText(staffMember.availability?.monday),
+      tuesday: toText(staffMember.availability?.tuesday),
+      wednesday: toText(staffMember.availability?.wednesday),
+      thursday: toText(staffMember.availability?.thursday),
+      friday: toText(staffMember.availability?.friday),
+      saturday: toText(staffMember.availability?.saturday),
+      sunday: toText(staffMember.availability?.sunday),
+    });
     setIsDialogOpen(true);
+  };
+
+  // Parse "HH:mm-HH:mm, HH:mm-HH:mm" -> [{start,end},...]
+  const parseTimeSlots = (value: string) => {
+    if (!value?.trim()) return [] as { start: string; end: string }[];
+    // Accept formats like "9:00-17:00", "09:00 - 17:00" (optional spaces, single-digit hour)
+    const segmentRe = /^\s*([0-1]?\d|2[0-3]):([0-5]\d)\s*-\s*([0-1]?\d|2[0-3]):([0-5]\d)\s*$/;
+
+    const pad2 = (n: string) => (n.length === 1 ? `0${n}` : n);
+
+    return value
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean)
+      .map(seg => {
+        const match = seg.match(segmentRe);
+        if (!match) return null;
+        const [, sh, sm, eh, em] = match;
+        const start = `${pad2(sh)}:${sm}`;
+        const end = `${pad2(eh)}:${em}`;
+        // Ensure start < end within the same day
+        return start < end ? { start, end } : null;
+      })
+      .filter(Boolean) as { start: string; end: string }[];
   };
 
   const handleRoleToggle = (roleId: string, checked: boolean) => {
     const newRoles = checked 
       ? [...formData.roles, roleId]
       : formData.roles.filter(id => id !== roleId);
-    
     setFormData(prev => ({ ...prev, roles: newRoles }));
+  };
+
+  const handleAvailabilityBlur = (day: string) => {
+    const parsedAvailability = parseTimeSlots(availabilityText[day]);
+    setFormData(prev => ({ ...prev, availability: { ...prev.availability, [day]: parsedAvailability } }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
+    // Ensure latest availability text is parsed before saving
+    const days = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
+    const parsedAvailability = days.reduce((acc: any, day) => {
+      acc[day] = parseTimeSlots(availabilityText[day]);
+      return acc;
+    }, { monday: [], tuesday: [], wednesday: [], thursday: [], friday: [], saturday: [], sunday: [] });
     if (!formData.name || !formData.email || !formData.phone) {
       toast({
         title: 'Missing required fields',
@@ -113,26 +177,19 @@ export default function StaffManagement() {
       return;
     }
 
-    if (formData.roles.length === 0) {
-      toast({
-        title: 'No roles selected',
-        description: 'Please select at least one role for this staff member.',
-        variant: 'destructive',
-      });
-      return;
-    }
-
     try {
+      const payload = { ...formData, availability: parsedAvailability } as any;
       if (editingStaff) {
-        await updateStaff(editingStaff.id, formData);
+        await updateStaff(editingStaff.id, payload);
       } else {
-        await addStaff(formData);
+        await addStaff(payload);
       }
       setIsDialogOpen(false);
     } catch (error) {
       console.error('Error saving staff:', error);
     }
   };
+
 
   const handleDeleteStaff = async (staffMember: any) => {
     await deleteStaff(staffMember.id);
@@ -341,6 +398,75 @@ export default function StaffManagement() {
                 </div>
               </div>
 
+              {/* Constraints (stored in staff.constraints JSONB) */}
+              <div className="space-y-4">
+                <h4 className="font-medium">Constraints</h4>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="max-hours-day">Max Hours / Day</Label>
+                    <Input
+                      id="max-hours-day"
+                      type="number"
+                      min={1}
+                      max={24}
+                      value={formData.constraints.maxHoursPerDay}
+                      onChange={(e) => setFormData(prev => ({
+                        ...prev,
+                        constraints: { ...prev.constraints, maxHoursPerDay: Number(e.target.value) || 0 }
+                      }))}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="max-hours-week">Max Hours / Week</Label>
+                    <Input
+                      id="max-hours-week"
+                      type="number"
+                      min={1}
+                      max={168}
+                      value={formData.constraints.maxHoursPerWeek}
+                      onChange={(e) => setFormData(prev => ({
+                        ...prev,
+                        constraints: { ...prev.constraints, maxHoursPerWeek: Number(e.target.value) || 0 }
+                      }))}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="min-hours-between">Min Hours Between Shifts</Label>
+                    <Input
+                      id="min-hours-between"
+                      type="number"
+                      min={0}
+                      max={24}
+                      value={formData.constraints.minHoursBetweenShifts}
+                      onChange={(e) => setFormData(prev => ({
+                        ...prev,
+                        constraints: { ...prev.constraints, minHoursBetweenShifts: Number(e.target.value) || 0 }
+                      }))}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Weekly Availability (days and timings) */}
+              <div className="space-y-4">
+                <h4 className="font-medium">Weekly Availability</h4>
+                <p className="text-sm text-muted-foreground">Use HH:mm-HH:mm ranges, comma-separated. Example: 09:00-12:00, 13:00-17:00</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {(['monday','tuesday','wednesday','thursday','friday','saturday','sunday'] as const).map((day) => (
+                    <div key={day} className="space-y-2">
+                      <Label htmlFor={`avail-${day}`}>{day.charAt(0).toUpperCase() + day.slice(1)}</Label>
+                      <Input
+                        id={`avail-${day}`}
+                        placeholder="09:00-17:00, 18:00-20:00"
+                        value={availabilityText[day]}
+                        onChange={(e) => setAvailabilityText(prev => ({ ...prev, [day]: e.target.value }))}
+                        onBlur={() => handleAvailabilityBlur(day)}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
               {/* Roles */}
               <div className="space-y-4">
                 <h4 className="font-medium">Roles</h4>
@@ -366,6 +492,8 @@ export default function StaffManagement() {
                   ))}
                 </div>
               </div>
+
+              
 
               <div className="flex justify-end space-x-4">
                 <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>

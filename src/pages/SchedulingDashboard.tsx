@@ -8,6 +8,7 @@ import { useStaff } from '@/hooks/useStaff';
 import { useSchedules } from '@/hooks/useSchedules';
 import { generateScheduleWithAI } from '@/lib/scheduling';
 import { useToast } from '@/hooks/use-toast';
+import { fetchStaffAndSendToWebhook } from '@/lib/webhookIntegration';
 import { ScheduleQuickActions } from '@/components/schedule/QuickActions';
 
 export default function SchedulingDashboard() {
@@ -30,6 +31,27 @@ export default function SchedulingDashboard() {
     setIsGenerating(true);
     
     try {
+      // First, execute the webhook integration (original script.js functionality)
+      console.log('🔄 Starting webhook integration...');
+      const webhookResult = await fetchStaffAndSendToWebhook();
+      
+      if (webhookResult.success) {
+        toast({
+          title: 'Webhook integration successful',
+          description: webhookResult.message,
+        });
+        console.log('✅ Webhook integration completed:', webhookResult);
+      } else {
+        toast({
+          title: 'Webhook integration warning',
+          description: webhookResult.message,
+          variant: 'destructive',
+        });
+        console.warn('⚠️ Webhook integration failed:', webhookResult.error);
+        // Continue with schedule generation even if webhook fails
+      }
+
+      // Then proceed with the original AI schedule generation
       const weekStartDate = new Date();
       const staffAvailability = staff.reduce((acc, s) => {
         acc[s.id] = s.availability;
@@ -83,12 +105,17 @@ export default function SchedulingDashboard() {
           generated_by: 'AI'
         });
         
+        const successMessage = webhookResult.success 
+          ? `Created ${response.schedule.length} shifts with ${response.efficiency}% efficiency. Staff data sent to webhook successfully.`
+          : `Created ${response.schedule.length} shifts with ${response.efficiency}% efficiency. Note: Webhook integration had issues.`;
+        
         toast({
           title: 'Schedule generated!',
-          description: `Created ${response.schedule.length} shifts with ${response.efficiency}% efficiency.`,
+          description: successMessage,
         });
       }
     } catch (error) {
+      console.error('❌ Schedule generation error:', error);
       toast({
         title: 'Generation failed',
         description: 'Failed to generate schedule. Please try again.',
