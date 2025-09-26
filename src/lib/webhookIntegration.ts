@@ -24,14 +24,15 @@ export interface WebhookIntegrationResult {
  * Fetches staff data from Supabase and sends it to the n8n webhook
  * This function replicates the functionality from the original script.js
  */
-export async function fetchStaffAndSendToWebhook(): Promise<WebhookIntegrationResult> {
+export async function fetchStaffAndSendToWebhook(businessId: string): Promise<WebhookIntegrationResult> {
   try {
     console.log('🔄 Starting webhook integration...');
     
-    // Fetch all rows from staff table
+    // Fetch rows for the specified business only
     const { data, error } = await supabase
       .from(TABLE_NAME)
-      .select("*");
+      .select("*")
+      .eq('business_id', businessId);
 
     if (error) {
       console.error("❌ Supabase fetch error:", error);
@@ -42,7 +43,7 @@ export async function fetchStaffAndSendToWebhook(): Promise<WebhookIntegrationRe
       };
     }
 
-    console.log(`✅ Fetched ${data.length} staff records.`);
+    console.log(`✅ Fetched ${data.length} staff records for business_id=${businessId}.`);
 
     // Send data to n8n webhook using fetch API
     const response = await fetch(N8N_WEBHOOK_URL, {
@@ -62,7 +63,7 @@ export async function fetchStaffAndSendToWebhook(): Promise<WebhookIntegrationRe
     
     return {
       success: true,
-      message: `Successfully sent ${data.length} staff records to webhook`,
+      message: `Successfully sent ${data.length} staff records to webhook for business_id=${businessId}`,
       data: {
         recordCount: data.length,
         webhookStatus: response.status,

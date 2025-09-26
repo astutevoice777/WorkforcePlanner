@@ -7,6 +7,7 @@ import { useBusiness } from '@/hooks/useBusiness';
 import { useStaff } from '@/hooks/useStaff';
 import { useSchedules } from '@/hooks/useSchedules';
 import { generateScheduleWithAI } from '@/lib/scheduling';
+import type { StaffAvailability as AiStaffAvailability } from '@/types/scheduling';
 import { useToast } from '@/hooks/use-toast';
 import { fetchStaffAndSendToWebhook } from '@/lib/webhookIntegration';
 import { ScheduleQuickActions } from '@/components/schedule/QuickActions';
@@ -33,7 +34,7 @@ export default function SchedulingDashboard() {
     try {
       // First, execute the webhook integration (original script.js functionality)
       console.log('🔄 Starting webhook integration...');
-      const webhookResult = await fetchStaffAndSendToWebhook();
+      const webhookResult = await fetchStaffAndSendToWebhook(business.id);
       
       if (webhookResult.success) {
         toast({
@@ -54,9 +55,10 @@ export default function SchedulingDashboard() {
       // Then proceed with the original AI schedule generation
       const weekStartDate = new Date();
       const staffAvailability = staff.reduce((acc, s) => {
-        acc[s.id] = s.availability;
+        // Cast UI/store availability to the AI scheduler's StaffAvailability type
+        acc[s.id] = s.availability as unknown as AiStaffAvailability;
         return acc;
-      }, {} as Record<string, any>);
+      }, {} as Record<string, AiStaffAvailability>);
 
       const response = await generateScheduleWithAI({
         businessId: business.id,

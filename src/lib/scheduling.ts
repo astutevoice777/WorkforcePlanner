@@ -81,11 +81,27 @@ export async function generateScheduleWithAI(request: AIScheduleRequest): Promis
           // Use the first available time slot (in real implementation, this would be more sophisticated)
           const timeSlot = availability[0];
           
-          // Calculate shift duration
-          const startHour = parseInt(timeSlot.startTime.split(':')[0]);
-          const startMinute = parseInt(timeSlot.startTime.split(':')[1]);
-          const endHour = parseInt(timeSlot.endTime.split(':')[0]);
-          const endMinute = parseInt(timeSlot.endTime.split(':')[1]);
+          // Calculate shift duration with null-safety and support for different key names
+          const startStr = (timeSlot as any).startTime ?? (timeSlot as any).start;
+          const endStr = (timeSlot as any).endTime ?? (timeSlot as any).end;
+
+          if (!startStr || !endStr || typeof startStr !== 'string' || typeof endStr !== 'string') {
+            warnings.push(`Invalid time slot for staff ${staffId} on ${day}: missing start/end time`);
+            continue;
+          }
+
+          const [startHourStr, startMinuteStr] = startStr.split(':');
+          const [endHourStr, endMinuteStr] = endStr.split(':');
+
+          const startHour = parseInt(startHourStr, 10);
+          const startMinute = parseInt(startMinuteStr, 10);
+          const endHour = parseInt(endHourStr, 10);
+          const endMinute = parseInt(endMinuteStr, 10);
+
+          if ([startHour, startMinute, endHour, endMinute].some(n => Number.isNaN(n))) {
+            warnings.push(`Invalid time format for staff ${staffId} on ${day}: start=${startStr}, end=${endStr}`);
+            continue;
+          }
           
           const duration = (endHour * 60 + endMinute - startHour * 60 - startMinute) / 60;
           
@@ -99,8 +115,8 @@ export async function generateScheduleWithAI(request: AIScheduleRequest): Promis
             staffId,
             roleId: role.id,
             date: currentDate,
-            startTime: timeSlot.startTime,
-            endTime: timeSlot.endTime,
+            startTime: startStr,
+            endTime: endStr,
             duration,
             status: 'SCHEDULED',
             payRate: role.hourlyRate
