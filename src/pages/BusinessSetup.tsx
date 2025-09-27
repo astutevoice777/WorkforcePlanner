@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Layout } from '@/components/layout/Layout';
 import { Button } from '@/components/ui/button';
@@ -8,9 +8,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Switch } from '@/components/ui/switch';
 import { Badge } from '@/components/ui/badge';
 import { Plus, Trash2, Clock, Building } from 'lucide-react';
-import { useBusiness } from '@/contexts/AppContext';
+import { useBusiness } from '@/hooks/useBusiness';
 import { useToast } from '@/hooks/use-toast';
-import { Business, Role, DayHours } from '@/types/scheduling';
+
+interface DayHours {
+  isOpen: boolean;
+  openTime: string;
+  closeTime: string;
+}
 
 const defaultDayHours: DayHours = {
   isOpen: true,
@@ -34,15 +39,15 @@ const dayLabels = {
 
 export default function BusinessSetup() {
   const navigate = useNavigate();
-  const { business, updateBusiness } = useBusiness();
+  const { business, roles, saveBusiness, saveRoles, loading } = useBusiness();
   const { toast } = useToast();
 
-  const [formData, setFormData] = useState<Partial<Business>>({
-    name: business?.name || '',
-    address: business?.address || '',
-    phone: business?.phone || '',
-    email: business?.email || '',
-    businessHours: business?.businessHours || {
+  const [formData, setFormData] = useState({
+    name: '',
+    address: '',
+    phone: '',
+    email: '',
+    business_hours: {
       monday: defaultDayHours,
       tuesday: defaultDayHours,
       wednesday: defaultDayHours,
@@ -51,79 +56,39 @@ export default function BusinessSetup() {
       saturday: { isOpen: true, openTime: '10:00', closeTime: '18:00' },
       sunday: { isOpen: false, openTime: '10:00', closeTime: '16:00' }
     },
-    roles: business?.roles || [
+    roles: [
       {
-        id: 'role-1',
         name: 'General Staff',
         description: 'General duties and customer service',
-        hourlyRate: 15,
-        minStaffRequired: 1,
-        maxStaffAllowed: 3,
+        hourly_rate: 15,
+        min_staff_required: 1,
+        max_staff_allowed: 3,
         color: '#3B82F6'
       }
     ]
   });
 
-  const handleInputChange = (field: keyof Business, value: any) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
-  };
-
-  const handleBusinessHoursChange = (day: keyof typeof formData.businessHours, field: keyof DayHours, value: any) => {
-    setFormData(prev => ({
-      ...prev,
-      businessHours: {
-        ...prev.businessHours!,
-        [day]: {
-          ...prev.businessHours![day],
-          [field]: value
-        }
-      }
-    }));
-  };
-
-  const handleRoleChange = (roleId: string, field: keyof Role, value: any) => {
-    setFormData(prev => ({
-      ...prev,
-      roles: prev.roles!.map(role => 
-        role.id === roleId ? { ...role, [field]: value } : role
-      )
-    }));
-  };
-
-  const addRole = () => {
-    const newRole: Role = {
-      id: `role-${Date.now()}`,
-      name: '',
-      description: '',
-      hourlyRate: 15,
-      minStaffRequired: 1,
-      maxStaffAllowed: 2,
-      color: '#10B981'
-    };
-
-    setFormData(prev => ({
-      ...prev,
-      roles: [...(prev.roles || []), newRole]
-    }));
-  };
-
-  const removeRole = (roleId: string) => {
-    if (formData.roles!.length <= 1) {
-      toast({
-        title: 'Cannot remove role',
-        description: 'You must have at least one role defined.',
-        variant: 'destructive',
+  useEffect(() => {
+    if (business) {
+      setFormData({
+        name: business.name,
+        address: business.address || '',
+        phone: business.phone || '',
+        email: business.email || '',
+        business_hours: business.business_hours || formData.business_hours,
+        roles: roles.length > 0 ? roles.map(r => ({
+          name: r.name,
+          description: r.description || '',
+          hourly_rate: r.hourly_rate,
+          min_staff_required: r.min_staff_required,
+          max_staff_allowed: r.max_staff_allowed,
+          color: r.color
+        })) : formData.roles
       });
-      return;
     }
+  }, [business, roles]);
 
-    setFormData(prev => ({
-      ...prev,
-      roles: prev.roles!.filter(role => role.id !== roleId)
-    }));
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
     if (!formData.name) {
@@ -135,44 +100,85 @@ export default function BusinessSetup() {
       return;
     }
 
-    const businessData: Business = {
-      id: business?.id || `business-${Date.now()}`,
-      name: formData.name!,
-      address: formData.address,
-      phone: formData.phone,
-      email: formData.email,
-      businessHours: formData.businessHours!,
-      roles: formData.roles!,
-      createdAt: business?.createdAt || new Date(),
-      updatedAt: new Date()
+    try {
+      // Save business
+      const businessResult = await saveBusiness({
+        name: formData.name,
+        address: formData.address,
+        phone: formData.phone,
+        email: formData.email,
+        business_hours: formData.business_hours,
+      });
+
+      if (businessResult.error) throw businessResult.error;
+
+      // Save roles
+      const rolesResult = await saveRoles(formData.roles);
+      if (rolesResult.error) throw rolesResult.error;
+
+      toast({
+        title: 'Business setup saved!',
+        description: 'Your business configuration has been updated.',
+      });
+
+      navigate('/staff');
+    } catch (error) {
+      console.error('Save error:', error);
+    }
+  };
+
+  const handleBusinessHoursChange = (day: keyof typeof formData.business_hours, field: keyof DayHours, value: any) => {
+    setFormData(prev => ({
+      ...prev,
+      business_hours: {
+        ...prev.business_hours,
+        [day]: {
+          ...prev.business_hours[day],
+          [field]: value
+        }
+      }
+    }));
+  };
+
+  const addRole = () => {
+    const newRole = {
+      name: '',
+      description: '',
+      hourly_rate: 15,
+      min_staff_required: 1,
+      max_staff_allowed: 2,
+      color: '#10B981'
     };
 
-    updateBusiness(businessData);
-    
-    toast({
-      title: 'Business setup saved!',
-      description: 'Your business configuration has been updated.',
-    });
-
-    navigate('/staff');
+    setFormData(prev => ({
+      ...prev,
+      roles: [...prev.roles, newRole]
+    }));
   };
 
-  const getTotalOpenDays = () => {
-    return weekDays.filter(day => formData.businessHours?.[day]?.isOpen).length;
+  const removeRole = (index: number) => {
+    if (formData.roles.length <= 1) {
+      toast({
+        title: 'Cannot remove role',
+        description: 'You must have at least one role defined.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setFormData(prev => ({
+      ...prev,
+      roles: prev.roles.filter((_, i) => i !== index)
+    }));
   };
 
-  const getWeeklyHours = () => {
-    return weekDays.reduce((total, day) => {
-      const dayHours = formData.businessHours?.[day];
-      if (!dayHours?.isOpen) return total;
-      
-      const open = dayHours.openTime.split(':');
-      const close = dayHours.closeTime.split(':');
-      const openMinutes = parseInt(open[0]) * 60 + parseInt(open[1]);
-      const closeMinutes = parseInt(close[0]) * 60 + parseInt(close[1]);
-      
-      return total + (closeMinutes - openMinutes) / 60;
-    }, 0);
+  const updateRole = (index: number, field: string, value: any) => {
+    setFormData(prev => ({
+      ...prev,
+      roles: prev.roles.map((role, i) => 
+        i === index ? { ...role, [field]: value } : role
+      )
+    }));
   };
 
   return (
@@ -193,9 +199,7 @@ export default function BusinessSetup() {
           <Card className="shadow-card">
             <CardHeader>
               <CardTitle>Business Information</CardTitle>
-              <CardDescription>
-                Basic details about your business
-              </CardDescription>
+              <CardDescription>Basic details about your business</CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -205,7 +209,7 @@ export default function BusinessSetup() {
                     id="business-name"
                     placeholder="Corner Coffee Shop"
                     value={formData.name}
-                    onChange={(e) => handleInputChange('name', e.target.value)}
+                    onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
                     required
                   />
                 </div>
@@ -216,7 +220,7 @@ export default function BusinessSetup() {
                     type="email"
                     placeholder="manager@business.com"
                     value={formData.email}
-                    onChange={(e) => handleInputChange('email', e.target.value)}
+                    onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))}
                   />
                 </div>
               </div>
@@ -228,7 +232,7 @@ export default function BusinessSetup() {
                     id="business-phone"
                     placeholder="+1 555-0123"
                     value={formData.phone}
-                    onChange={(e) => handleInputChange('phone', e.target.value)}
+                    onChange={(e) => setFormData(prev => ({ ...prev, phone: e.target.value }))}
                   />
                 </div>
                 <div className="space-y-2">
@@ -237,7 +241,7 @@ export default function BusinessSetup() {
                     id="business-address"
                     placeholder="123 Main Street, Downtown"
                     value={formData.address}
-                    onChange={(e) => handleInputChange('address', e.target.value)}
+                    onChange={(e) => setFormData(prev => ({ ...prev, address: e.target.value }))}
                   />
                 </div>
               </div>
@@ -251,17 +255,7 @@ export default function BusinessSetup() {
                 <Clock className="h-5 w-5" />
                 <span>Business Hours</span>
               </CardTitle>
-              <CardDescription>
-                Set your operating hours for each day of the week
-              </CardDescription>
-              <div className="flex space-x-4 text-sm">
-                <Badge variant="outline">
-                  {getTotalOpenDays()} days open
-                </Badge>
-                <Badge variant="outline">
-                  {getWeeklyHours().toFixed(1)} hours/week
-                </Badge>
-              </div>
+              <CardDescription>Set your operating hours for each day of the week</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
@@ -272,17 +266,17 @@ export default function BusinessSetup() {
                     </div>
                     
                     <Switch
-                      checked={formData.businessHours?.[day]?.isOpen}
+                      checked={formData.business_hours[day]?.isOpen}
                       onCheckedChange={(checked) => 
                         handleBusinessHoursChange(day, 'isOpen', checked)
                       }
                     />
                     
-                    {formData.businessHours?.[day]?.isOpen && (
+                    {formData.business_hours[day]?.isOpen && (
                       <div className="flex items-center space-x-2">
                         <Input
                           type="time"
-                          value={formData.businessHours[day].openTime}
+                          value={formData.business_hours[day].openTime}
                           onChange={(e) => 
                             handleBusinessHoursChange(day, 'openTime', e.target.value)
                           }
@@ -291,7 +285,7 @@ export default function BusinessSetup() {
                         <span className="text-muted-foreground">to</span>
                         <Input
                           type="time"
-                          value={formData.businessHours[day].closeTime}
+                          value={formData.business_hours[day].closeTime}
                           onChange={(e) => 
                             handleBusinessHoursChange(day, 'closeTime', e.target.value)
                           }
@@ -300,7 +294,7 @@ export default function BusinessSetup() {
                       </div>
                     )}
                     
-                    {!formData.businessHours?.[day]?.isOpen && (
+                    {!formData.business_hours[day]?.isOpen && (
                       <span className="text-muted-foreground text-sm">Closed</span>
                     )}
                   </div>
@@ -313,22 +307,20 @@ export default function BusinessSetup() {
           <Card className="shadow-card">
             <CardHeader>
               <CardTitle>Staff Roles</CardTitle>
-              <CardDescription>
-                Define the different roles your staff can work in
-              </CardDescription>
+              <CardDescription>Define the different roles your staff can work in</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                {formData.roles?.map((role, index) => (
-                  <div key={role.id} className="p-4 rounded-lg border border-border space-y-4">
+                {formData.roles.map((role, index) => (
+                  <div key={index} className="p-4 rounded-lg border border-border space-y-4">
                     <div className="flex items-center justify-between">
                       <h4 className="font-medium">Role {index + 1}</h4>
-                      {formData.roles!.length > 1 && (
+                      {formData.roles.length > 1 && (
                         <Button
                           type="button"
                           variant="ghost"
                           size="sm"
-                          onClick={() => removeRole(role.id)}
+                          onClick={() => removeRole(index)}
                           className="text-destructive hover:text-destructive"
                         >
                           <Trash2 className="h-4 w-4" />
@@ -342,7 +334,7 @@ export default function BusinessSetup() {
                         <Input
                           placeholder="Barista"
                           value={role.name}
-                          onChange={(e) => handleRoleChange(role.id, 'name', e.target.value)}
+                          onChange={(e) => updateRole(index, 'name', e.target.value)}
                         />
                       </div>
                       <div className="space-y-2">
@@ -352,8 +344,8 @@ export default function BusinessSetup() {
                           min="0"
                           step="0.50"
                           placeholder="15.00"
-                          value={role.hourlyRate}
-                          onChange={(e) => handleRoleChange(role.id, 'hourlyRate', parseFloat(e.target.value) || 0)}
+                          value={role.hourly_rate}
+                          onChange={(e) => updateRole(index, 'hourly_rate', parseFloat(e.target.value) || 0)}
                         />
                       </div>
                     </div>
@@ -363,29 +355,8 @@ export default function BusinessSetup() {
                       <Input
                         placeholder="Coffee preparation and customer service"
                         value={role.description}
-                        onChange={(e) => handleRoleChange(role.id, 'description', e.target.value)}
+                        onChange={(e) => updateRole(index, 'description', e.target.value)}
                       />
-                    </div>
-                    
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label>Min Staff Required</Label>
-                        <Input
-                          type="number"
-                          min="1"
-                          value={role.minStaffRequired}
-                          onChange={(e) => handleRoleChange(role.id, 'minStaffRequired', parseInt(e.target.value) || 1)}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Max Staff Allowed</Label>
-                        <Input
-                          type="number"
-                          min="1"
-                          value={role.maxStaffAllowed}
-                          onChange={(e) => handleRoleChange(role.id, 'maxStaffAllowed', parseInt(e.target.value) || 1)}
-                        />
-                      </div>
                     </div>
                   </div>
                 ))}
@@ -407,8 +378,8 @@ export default function BusinessSetup() {
             <Button type="button" variant="outline" onClick={() => navigate('/')}>
               Cancel
             </Button>
-            <Button type="submit" variant="gradient">
-              Save & Continue to Staff Management
+            <Button type="submit" variant="gradient" disabled={loading}>
+              {loading ? 'Saving...' : 'Save & Continue to Staff Management'}
             </Button>
           </div>
         </form>

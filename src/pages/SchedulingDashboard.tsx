@@ -3,17 +3,31 @@ import { Layout } from '@/components/layout/Layout';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Calendar, Bot, CheckCircle, AlertTriangle } from 'lucide-react';
-import { useApp } from '@/contexts/AppContext';
+import { useBusiness } from '@/hooks/useBusiness';
+import { useStaff } from '@/hooks/useStaff';
+import { useSchedules } from '@/hooks/useSchedules';
 import { generateScheduleWithAI } from '@/lib/scheduling';
+import type { StaffAvailability as AiStaffAvailability } from '@/types/scheduling';
 import { useToast } from '@/hooks/use-toast';
+import { fetchStaffAndSendToWebhook } from '@/lib/webhookIntegration';
+import { ScheduleQuickActions } from '@/components/schedule/QuickActions';
+import { SimpleScheduleList } from '@/components/schedule/SimpleScheduleList';
 
 export default function SchedulingDashboard() {
-  const { state, dispatch } = useApp();
+  const { business, roles } = useBusiness();
+  const { staff } = useStaff();
+  const { schedules, addSchedule } = useSchedules();
   const { toast } = useToast();
   const [isGenerating, setIsGenerating] = useState(false);
 
+  // Narrow shift status to GoogleCalendarView's accepted union type
+  const allowedStatuses = ['SCHEDULED', 'CONFIRMED', 'CANCELLED'] as const;
+  type ShiftStatus = typeof allowedStatuses[number];
+  const toShiftStatus = (s: string): ShiftStatus =>
+    (allowedStatuses as readonly string[]).includes(s) ? (s as ShiftStatus) : 'SCHEDULED';
+
   const handleGenerateSchedule = async () => {
-    if (!state.business || state.staff.length === 0) {
+    if (!business || staff.length === 0) {
       toast({
         title: 'Setup required',
         description: 'Please complete business setup and add staff first.',
@@ -25,53 +39,92 @@ export default function SchedulingDashboard() {
     setIsGenerating(true);
     
     try {
+      // First, execute the webhook integration (original script.js functionality)
+      console.log('🔄 Starting webhook integration...');
+      const webhookResult = await fetchStaffAndSendToWebhook(business.id);
+      
+      if (webhookResult.success) {
+        toast({
+          title: 'Webhook integration successful',
+          description: webhookResult.message,
+        });
+        console.log('✅ Webhook integration completed:', webhookResult);
+      } else {
+        toast({
+          title: 'Webhook integration warning',
+          description: webhookResult.message,
+          variant: 'destructive',
+        });
+        console.warn('⚠️ Webhook integration failed:', webhookResult.error);
+        // Continue with schedule generation even if webhook fails
+      }
+
+      // Then proceed with the original AI schedule generation
       const weekStartDate = new Date();
-      const staffAvailability = state.staff.reduce((acc, s) => {
-        acc[s.id] = s.availability;
+      const staffAvailability = staff.reduce((acc, s) => {
+        // Cast UI/store availability to the AI scheduler's StaffAvailability type
+        acc[s.id] = s.availability as unknown as AiStaffAvailability;
         return acc;
-      }, {} as Record<string, any>);
+      }, {} as Record<string, AiStaffAvailability>);
 
       const response = await generateScheduleWithAI({
-        businessId: state.business.id,
+        businessId: business.id,
         weekStartDate,
         staffAvailability,
-        businessHours: state.business.businessHours,
-        roles: state.business.roles,
+        businessHours: business.business_hours,
+        roles: roles.map(r => ({
+          id: r.id,
+          name: r.name,
+          description: r.description,
+          hourlyRate: r.hourly_rate,
+          minStaffRequired: r.min_staff_required,
+          maxStaffAllowed: r.max_staff_allowed,
+          color: r.color
+        })),
         constraints: {
           maxHoursPerDay: 8,
           maxHoursPerWeek: 40,
-          minStaffPerRole: state.business.roles.reduce((acc, r) => {
-            acc[r.id] = r.minStaffRequired;
+          minStaffPerRole: roles.reduce((acc, r) => {
+            acc[r.id] = r.min_staff_required;
             return acc;
           }, {} as Record<string, number>),
-          maxStaffPerRole: state.business.roles.reduce((acc, r) => {
-            acc[r.id] = r.maxStaffAllowed;
+          maxStaffPerRole: roles.reduce((acc, r) => {
+            acc[r.id] = r.max_staff_allowed;
             return acc;
           }, {} as Record<string, number>),
         },
-        timeOffRequests: state.timeOffRequests
+        timeOffRequests: []
       });
 
       if (response.success) {
-        const newSchedule = {
-          id: `schedule-${Date.now()}`,
-          businessId: state.business.id,
-          weekStartDate,
-          shifts: response.schedule,
-          status: 'DRAFT' as const,
-          generatedBy: 'AI' as const,
-          createdAt: new Date(),
-          updatedAt: new Date()
-        };
-
-        dispatch({ type: 'ADD_SCHEDULE', payload: newSchedule });
+        await addSchedule({
+          week_start_date: weekStartDate,
+          shifts: response.schedule.map(shift => ({
+            staff_id: shift.staffId,
+            role_id: shift.roleId,
+            date: shift.date.toISOString().split('T')[0],
+            start_time: shift.startTime,
+            end_time: shift.endTime,
+            duration: shift.duration,
+            status: shift.status,
+            notes: shift.notes,
+            pay_rate: shift.payRate
+          })),
+          status: 'DRAFT',
+          generated_by: 'AI'
+        });
+        
+        const successMessage = webhookResult.success 
+          ? `Created ${response.schedule.length} shifts with ${response.efficiency}% efficiency. Staff data sent to webhook successfully.`
+          : `Created ${response.schedule.length} shifts with ${response.efficiency}% efficiency. Note: Webhook integration had issues.`;
         
         toast({
           title: 'Schedule generated!',
-          description: `Created ${response.schedule.length} shifts with ${response.efficiency}% efficiency.`,
+          description: successMessage,
         });
       }
     } catch (error) {
+      console.error('❌ Schedule generation error:', error);
       toast({
         title: 'Generation failed',
         description: 'Failed to generate schedule. Please try again.',
@@ -96,14 +149,11 @@ export default function SchedulingDashboard() {
             </div>
           </div>
           
-          <Button 
-            onClick={handleGenerateSchedule} 
-            variant="gradient" 
-            disabled={isGenerating}
-          >
-            <Bot className="h-4 w-4 mr-2" />
-            {isGenerating ? 'Generating...' : 'Generate Schedule'}
-          </Button>
+          <ScheduleQuickActions 
+            hasSchedules={schedules.length > 0}
+            onGenerateSchedule={handleGenerateSchedule}
+            showEnhancedView={false}
+          />
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -112,7 +162,7 @@ export default function SchedulingDashboard() {
               <div className="flex items-center space-x-4">
                 <CheckCircle className="h-8 w-8 text-success" />
                 <div>
-                  <p className="text-2xl font-bold text-foreground">{state.schedules.length}</p>
+                  <p className="text-2xl font-bold text-foreground">{schedules.length}</p>
                   <p className="text-sm text-muted-foreground">Generated Schedules</p>
                 </div>
               </div>
@@ -125,7 +175,7 @@ export default function SchedulingDashboard() {
                 <Calendar className="h-8 w-8 text-primary" />
                 <div>
                   <p className="text-2xl font-bold text-foreground">
-                    {state.schedules.reduce((total, s) => total + s.shifts.length, 0)}
+                    {schedules.reduce((total, s) => total + (s.shifts?.length || 0), 0)}
                   </p>
                   <p className="text-sm text-muted-foreground">Total Shifts</p>
                 </div>
@@ -146,33 +196,10 @@ export default function SchedulingDashboard() {
           </Card>
         </div>
 
-        {state.schedules.length > 0 && (
-          <Card className="shadow-card">
-            <CardHeader>
-              <CardTitle>Recent Schedules</CardTitle>
-              <CardDescription>View and manage your generated schedules</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                {state.schedules.slice(0, 5).map((schedule) => (
-                  <div key={schedule.id} className="flex items-center justify-between p-4 rounded-lg border border-border">
-                    <div>
-                      <h4 className="font-medium">
-                        Week of {schedule.weekStartDate.toLocaleDateString()}
-                      </h4>
-                      <p className="text-sm text-muted-foreground">
-                        {schedule.shifts.length} shifts • {schedule.status}
-                      </p>
-                    </div>
-                    <Button variant="outline" size="sm">
-                      View Details
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        )}
+        {/* Simple list view backed by MongoDB API */}
+        <div>
+          <SimpleScheduleList />
+        </div>
       </div>
     </Layout>
   );

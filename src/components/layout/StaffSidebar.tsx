@@ -2,48 +2,12 @@ import React from 'react';
 import { NavLink } from 'react-router-dom';
 import { 
   Calendar, 
-  Users, 
-  Settings, 
-  BarChart3, 
   Clock,
-  Building,
   UserCheck,
-  DollarSign
+  LogOut
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-
-const ownerNavItems = [
-  {
-    title: 'Dashboard',
-    href: '/',
-    icon: BarChart3,
-  },
-  {
-    title: 'Business Setup',
-    href: '/business-setup',
-    icon: Building,
-  },
-  {
-    title: 'Staff Management',
-    href: '/staff',
-    icon: Users,
-  },
-  {
-    title: 'Schedule',
-    href: '/schedule',
-    icon: Calendar,
-  },
-  {
-    title: 'Time Off',
-    href: '/time-off',
-    icon: Clock,
-  },
-  {
-    title: 'Payroll',
-    href: '/payroll',
-    icon: DollarSign,
-  },
-];
+import { useStaffAuth } from '@/hooks/useStaffAuth';
 
 const staffNavItems = [
   {
@@ -63,15 +27,24 @@ const staffNavItems = [
   },
 ];
 
-export function Sidebar() {
-  // Owner-only sidebar - staff has their own StaffSidebar component
-  const navItems = ownerNavItems;
+export function StaffSidebar() {
+  const { signOut } = useStaffAuth();
+
+  const handleLogout = () => {
+    signOut();
+    window.location.href = '/staff-auth';
+  };
 
   return (
     <aside className="w-64 bg-card border-r border-border shadow-card">
       <div className="p-6">
+        <div className="mb-8">
+          <h2 className="text-lg font-semibold text-foreground">Staff Portal</h2>
+          <p className="text-sm text-muted-foreground">Employee Dashboard</p>
+        </div>
+        
         <nav className="space-y-2">
-          {navItems.map((item) => (
+          {staffNavItems.map((item) => (
             <NavLink
               key={item.href}
               to={item.href}
@@ -88,6 +61,16 @@ export function Sidebar() {
               <span>{item.title}</span>
             </NavLink>
           ))}
+          
+          <div className="pt-4 mt-4 border-t border-border">
+            <button
+              onClick={handleLogout}
+              className="flex items-center space-x-3 px-3 py-2 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-accent w-full transition-smooth"
+            >
+              <LogOut className="h-5 w-5" />
+              <span>Logout</span>
+            </button>
+          </div>
         </nav>
       </div>
     </aside>

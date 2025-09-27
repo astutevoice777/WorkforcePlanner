@@ -3,19 +3,23 @@ import { Layout } from '@/components/layout/Layout';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Calendar, Users, Building, Bot, ArrowRight } from 'lucide-react';
-import { useApp } from '@/contexts/AppContext';
+import { useBusiness } from '@/hooks/useBusiness';
+import { useStaff } from '@/hooks/useStaff';
+import { useSchedules } from '@/hooks/useSchedules';
 import { useNavigate } from 'react-router-dom';
 
 const Index = () => {
-  const { state } = useApp();
+  const { business, roles } = useBusiness();
+  const { staff } = useStaff();
+  const { schedules } = useSchedules();
   const navigate = useNavigate();
 
   const quickStats = {
-    totalStaff: state.staff.length,
-    totalSchedules: state.schedules.length,
-    totalShifts: state.schedules.reduce((total, s) => total + s.shifts.length, 0),
-    weeklyHours: state.schedules.reduce((total, s) => 
-      total + s.shifts.reduce((shiftTotal, shift) => shiftTotal + shift.duration, 0), 0
+    totalStaff: staff.length,
+    totalSchedules: schedules.length,
+    totalShifts: schedules.reduce((total, s) => total + (s.shifts?.length || 0), 0),
+    weeklyHours: schedules.reduce((total, s) => 
+      total + (s.shifts?.reduce((shiftTotal, shift) => shiftTotal + shift.duration, 0) || 0), 0
     )
   };
 
@@ -131,29 +135,29 @@ const Index = () => {
 
           <Card className="shadow-elevated">
             <CardHeader>
-              <CardTitle>Business Overview</CardTitle>
-              <CardDescription>
-                {state.business?.name || 'Set up your business to get started'}
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {state.business ? (
-                <div className="space-y-4">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Business Hours</span>
-                    <span className="font-medium">
-                      {Object.values(state.business.businessHours).filter(day => day.isOpen).length} days/week
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Roles Defined</span>
-                    <span className="font-medium">{state.business.roles.length}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Active Staff</span>
-                    <span className="font-medium">{state.staff.filter(s => s.isActive).length}</span>
-                  </div>
+            <CardTitle>Business Overview</CardTitle>
+            <CardDescription>
+              {business?.name || 'Set up your business to get started'}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {business ? (
+              <div className="space-y-4">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Business Hours</span>
+                  <span className="font-medium">
+                    {business.business_hours ? Object.values(business.business_hours).filter((day: any) => day?.isOpen).length : 0} days/week
+                  </span>
                 </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Roles Defined</span>
+                  <span className="font-medium">{roles.length}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Active Staff</span>
+                  <span className="font-medium">{staff.filter(s => s.is_active).length}</span>
+                </div>
+              </div>
               ) : (
                 <div className="text-center py-8">
                   <Building className="h-12 w-12 text-muted-foreground mx-auto mb-4" />

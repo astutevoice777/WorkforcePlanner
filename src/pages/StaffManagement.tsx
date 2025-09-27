@@ -8,46 +8,47 @@ import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Plus, Edit, Trash2, Users, Clock, Mail, Phone } from 'lucide-react';
-import { useStaff, useBusiness } from '@/contexts/AppContext';
+import { useStaff } from '@/hooks/useStaff';
+import { useBusiness } from '@/hooks/useBusiness';
 import { useToast } from '@/hooks/use-toast';
-import { Staff, StaffAvailability, TimeSlot } from '@/types/scheduling';
-
-const weekDays = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'] as const;
-const dayLabels = {
-  monday: 'Mon', tuesday: 'Tue', wednesday: 'Wed', thursday: 'Thu', 
-  friday: 'Fri', saturday: 'Sat', sunday: 'Sun'
-};
-
-const defaultAvailability: StaffAvailability = {
-  monday: [],
-  tuesday: [],
-  wednesday: [],
-  thursday: [],
-  friday: [],
-  saturday: [],
-  sunday: []
-};
 
 export default function StaffManagement() {
-  const { staff, addStaff, updateStaff, deleteStaff } = useStaff();
-  const { business } = useBusiness();
+  const { staff, addStaff, updateStaff, deleteStaff, loading } = useStaff();
+  const { business, roles } = useBusiness();
   const { toast } = useToast();
   
   const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [editingStaff, setEditingStaff] = useState<Staff | null>(null);
-  const [formData, setFormData] = useState<Partial<Staff>>({
+  const [editingStaff, setEditingStaff] = useState<any>(null);
+  const [formData, setFormData] = useState({
     name: '',
     email: '',
     phone: '',
-    roles: [],
-    availability: defaultAvailability,
+    roles: [] as string[],
+    availability: {
+      monday: [],
+      tuesday: [],
+      wednesday: [],
+      thursday: [],
+      friday: [],
+      saturday: [],
+      sunday: []
+    },
     constraints: {
       maxHoursPerDay: 8,
       maxHoursPerWeek: 40,
-      minHoursBetweenShifts: 12,
-      preferredDaysOff: []
+      minHoursBetweenShifts: 12
     },
-    isActive: true
+    is_active: true
+  });
+  // Raw text state for availability inputs (so typing is smooth)
+  const [availabilityText, setAvailabilityText] = useState<Record<string, string>>({
+    monday: '',
+    tuesday: '',
+    wednesday: '',
+    thursday: '',
+    friday: '',
+    saturday: '',
+    sunday: ''
   });
 
   const openAddDialog = () => {
@@ -57,67 +58,116 @@ export default function StaffManagement() {
       email: '',
       phone: '',
       roles: [],
-      availability: defaultAvailability,
+      availability: {
+        monday: [],
+        tuesday: [],
+        wednesday: [],
+        thursday: [],
+        friday: [],
+        saturday: [],
+        sunday: []
+      },
       constraints: {
         maxHoursPerDay: 8,
         maxHoursPerWeek: 40,
-        minHoursBetweenShifts: 12,
-        preferredDaysOff: []
+        minHoursBetweenShifts: 12
       },
-      isActive: true
+      is_active: true
+    });
+    setAvailabilityText({
+      monday: '',
+      tuesday: '',
+      wednesday: '',
+      thursday: '',
+      friday: '',
+      saturday: '',
+      sunday: ''
     });
     setIsDialogOpen(true);
   };
 
-  const openEditDialog = (staffMember: Staff) => {
+  const openEditDialog = (staffMember: any) => {
     setEditingStaff(staffMember);
-    setFormData(staffMember);
+    setFormData({
+      name: staffMember.name,
+      email: staffMember.email,
+      phone: staffMember.phone,
+      roles: staffMember.roles || [],
+      availability: staffMember.availability || {
+        monday: [],
+        tuesday: [],
+        wednesday: [],
+        thursday: [],
+        friday: [],
+        saturday: [],
+        sunday: []
+      },
+      constraints: staffMember.constraints || {
+        maxHoursPerDay: 8,
+        maxHoursPerWeek: 40,
+        minHoursBetweenShifts: 12
+      },
+      is_active: staffMember.is_active
+    });
+    // Seed raw text from availability
+    const toText = (slots: any[] = []) => slots.map(s => `${s.start}-${s.end}`).join(', ');
+    setAvailabilityText({
+      monday: toText(staffMember.availability?.monday),
+      tuesday: toText(staffMember.availability?.tuesday),
+      wednesday: toText(staffMember.availability?.wednesday),
+      thursday: toText(staffMember.availability?.thursday),
+      friday: toText(staffMember.availability?.friday),
+      saturday: toText(staffMember.availability?.saturday),
+      sunday: toText(staffMember.availability?.sunday),
+    });
     setIsDialogOpen(true);
   };
 
-  const handleInputChange = (field: keyof Staff, value: any) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
+  // Parse "HH:mm-HH:mm, HH:mm-HH:mm" -> [{start,end},...]
+  const parseTimeSlots = (value: string) => {
+    if (!value?.trim()) return [] as { start: string; end: string }[];
+    // Accept formats like "9:00-17:00", "09:00 - 17:00" (optional spaces, single-digit hour)
+    const segmentRe = /^\s*([0-1]?\d|2[0-3]):([0-5]\d)\s*-\s*([0-1]?\d|2[0-3]):([0-5]\d)\s*$/;
+
+    const pad2 = (n: string) => (n.length === 1 ? `0${n}` : n);
+
+    return value
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean)
+      .map(seg => {
+        const match = seg.match(segmentRe);
+        if (!match) return null;
+        const [, sh, sm, eh, em] = match;
+        const start = `${pad2(sh)}:${sm}`;
+        const end = `${pad2(eh)}:${em}`;
+        // Ensure start < end within the same day
+        return start < end ? { start, end } : null;
+      })
+      .filter(Boolean) as { start: string; end: string }[];
   };
 
   const handleRoleToggle = (roleId: string, checked: boolean) => {
     const newRoles = checked 
-      ? [...(formData.roles || []), roleId]
-      : (formData.roles || []).filter(id => id !== roleId);
-    
-    handleInputChange('roles', newRoles);
+      ? [...formData.roles, roleId]
+      : formData.roles.filter(id => id !== roleId);
+    setFormData(prev => ({ ...prev, roles: newRoles }));
   };
 
-  const handleAvailabilityChange = (day: keyof StaffAvailability, timeSlots: TimeSlot[]) => {
-    setFormData(prev => ({
-      ...prev,
-      availability: {
-        ...prev.availability!,
-        [day]: timeSlots
-      }
-    }));
+  const handleAvailabilityBlur = (day: string) => {
+    const parsedAvailability = parseTimeSlots(availabilityText[day]);
+    setFormData(prev => ({ ...prev, availability: { ...prev.availability, [day]: parsedAvailability } }));
   };
 
-  const addTimeSlot = (day: keyof StaffAvailability) => {
-    const currentSlots = formData.availability![day] || [];
-    const newSlot: TimeSlot = { startTime: '09:00', endTime: '17:00' };
-    handleAvailabilityChange(day, [...currentSlots, newSlot]);
-  };
-
-  const removeTimeSlot = (day: keyof StaffAvailability, index: number) => {
-    const currentSlots = formData.availability![day] || [];
-    const newSlots = currentSlots.filter((_, i) => i !== index);
-    handleAvailabilityChange(day, newSlots);
-  };
-
-  const updateTimeSlot = (day: keyof StaffAvailability, index: number, field: keyof TimeSlot, value: string) => {
-    const currentSlots = [...(formData.availability![day] || [])];
-    currentSlots[index] = { ...currentSlots[index], [field]: value };
-    handleAvailabilityChange(day, currentSlots);
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
+    // Ensure latest availability text is parsed before saving
+    const days = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
+    const parsedAvailability = days.reduce((acc: any, day) => {
+      acc[day] = parseTimeSlots(availabilityText[day]);
+      return acc;
+    }, { monday: [], tuesday: [], wednesday: [], thursday: [], friday: [], saturday: [], sunday: [] });
     if (!formData.name || !formData.email || !formData.phone) {
       toast({
         title: 'Missing required fields',
@@ -127,79 +177,22 @@ export default function StaffManagement() {
       return;
     }
 
-    if (formData.roles!.length === 0) {
-      toast({
-        title: 'No roles selected',
-        description: 'Please select at least one role for this staff member.',
-        variant: 'destructive',
-      });
-      return;
+    try {
+      const payload = { ...formData, availability: parsedAvailability } as any;
+      if (editingStaff) {
+        await updateStaff(editingStaff.id, payload);
+      } else {
+        await addStaff(payload);
+      }
+      setIsDialogOpen(false);
+    } catch (error) {
+      console.error('Error saving staff:', error);
     }
-
-    const staffData: Staff = {
-      id: editingStaff?.id || `staff-${Date.now()}`,
-      name: formData.name!,
-      email: formData.email!,
-      phone: formData.phone!,
-      roles: formData.roles!,
-      availability: formData.availability!,
-      constraints: formData.constraints!,
-      isActive: formData.isActive!,
-      createdAt: editingStaff?.createdAt || new Date(),
-      updatedAt: new Date()
-    };
-
-    if (editingStaff) {
-      updateStaff(staffData);
-      toast({
-        title: 'Staff updated',
-        description: `${staffData.name}'s information has been updated.`,
-      });
-    } else {
-      addStaff(staffData);
-      toast({
-        title: 'Staff added',
-        description: `${staffData.name} has been added to your team.`,
-      });
-    }
-
-    setIsDialogOpen(false);
   };
 
-  const handleDeleteStaff = (staffMember: Staff) => {
-    deleteStaff(staffMember.id);
-    toast({
-      title: 'Staff removed',
-      description: `${staffMember.name} has been removed from your team.`,
-    });
-  };
 
-  const getRoleNames = (roleIds: string[]) => {
-    return roleIds
-      .map(id => business?.roles.find(r => r.id === id)?.name)
-      .filter(Boolean)
-      .join(', ');
-  };
-
-  const getAvailabilityDays = (availability: StaffAvailability) => {
-    return weekDays
-      .filter(day => availability[day] && availability[day].length > 0)
-      .map(day => dayLabels[day])
-      .join(', ');
-  };
-
-  const getTotalWeeklyHours = (availability: StaffAvailability) => {
-    return weekDays.reduce((total, day) => {
-      const slots = availability[day] || [];
-      const dayHours = slots.reduce((dayTotal, slot) => {
-        const start = slot.startTime.split(':');
-        const end = slot.endTime.split(':');
-        const startMinutes = parseInt(start[0]) * 60 + parseInt(start[1]);
-        const endMinutes = parseInt(end[0]) * 60 + parseInt(end[1]);
-        return dayTotal + (endMinutes - startMinutes) / 60;
-      }, 0);
-      return total + dayHours;
-    }, 0);
+  const handleDeleteStaff = async (staffMember: any) => {
+    await deleteStaff(staffMember.id);
   };
 
   return (
@@ -245,9 +238,7 @@ export default function StaffManagement() {
                   <Clock className="h-6 w-6 text-success" />
                 </div>
                 <div>
-                  <p className="text-2xl font-bold text-foreground">
-                    {staff.reduce((total, s) => total + getTotalWeeklyHours(s.availability), 0).toFixed(0)}
-                  </p>
+                  <p className="text-2xl font-bold text-foreground">0</p>
                   <p className="text-sm text-muted-foreground">Total Weekly Hours</p>
                 </div>
               </div>
@@ -262,7 +253,7 @@ export default function StaffManagement() {
                 </div>
                 <div>
                   <p className="text-2xl font-bold text-foreground">
-                    {staff.filter(s => s.isActive).length}
+                    {staff.filter(s => s.is_active).length}
                   </p>
                   <p className="text-sm text-muted-foreground">Active Staff</p>
                 </div>
@@ -275,9 +266,7 @@ export default function StaffManagement() {
         <Card className="shadow-card">
           <CardHeader>
             <CardTitle>Team Members</CardTitle>
-            <CardDescription>
-              View and manage your staff members and their availability
-            </CardDescription>
+            <CardDescription>View and manage your staff members and their availability</CardDescription>
           </CardHeader>
           <CardContent>
             {staff.length === 0 ? (
@@ -300,7 +289,7 @@ export default function StaffManagement() {
                       <div className="flex items-center space-x-4">
                         <div className="w-10 h-10 bg-gradient-primary rounded-full flex items-center justify-center">
                           <span className="text-white font-medium text-sm">
-                            {staffMember.name.split(' ').map(n => n[0]).join('').toUpperCase()}
+                            {staffMember.name.split(' ').map((n: string) => n[0]).join('').toUpperCase()}
                           </span>
                         </div>
                         <div className="flex-1">
@@ -319,8 +308,8 @@ export default function StaffManagement() {
                       </div>
                       <div className="mt-3 flex flex-wrap gap-2">
                         <div className="flex flex-wrap gap-1">
-                          {staffMember.roles.map(roleId => {
-                            const role = business?.roles.find(r => r.id === roleId);
+                          {staffMember.roles?.map((roleId: string) => {
+                            const role = roles.find(r => r.id === roleId);
                             return role ? (
                               <Badge key={roleId} variant="outline" style={{ borderColor: role.color }}>
                                 {role.name}
@@ -328,12 +317,6 @@ export default function StaffManagement() {
                             ) : null;
                           })}
                         </div>
-                        <Badge variant="secondary">
-                          {getAvailabilityDays(staffMember.availability)}
-                        </Badge>
-                        <Badge variant="outline">
-                          {getTotalWeeklyHours(staffMember.availability).toFixed(1)}h/week
-                        </Badge>
                       </div>
                     </div>
                     
@@ -363,7 +346,7 @@ export default function StaffManagement() {
 
         {/* Add/Edit Staff Dialog */}
         <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>
                 {editingStaff ? 'Edit Staff Member' : 'Add New Staff Member'}
@@ -371,7 +354,7 @@ export default function StaffManagement() {
               <DialogDescription>
                 {editingStaff 
                   ? 'Update staff member information and availability'
-                  : 'Add a new team member with their roles and availability'
+                  : 'Add a new team member with their roles'
                 }
               </DialogDescription>
             </DialogHeader>
@@ -387,7 +370,7 @@ export default function StaffManagement() {
                       id="staff-name"
                       placeholder="John Doe"
                       value={formData.name}
-                      onChange={(e) => handleInputChange('name', e.target.value)}
+                      onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
                       required
                     />
                   </div>
@@ -398,7 +381,7 @@ export default function StaffManagement() {
                       type="email"
                       placeholder="john@email.com"
                       value={formData.email}
-                      onChange={(e) => handleInputChange('email', e.target.value)}
+                      onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))}
                       required
                     />
                   </div>
@@ -408,10 +391,79 @@ export default function StaffManagement() {
                       id="staff-phone"
                       placeholder="+1 555-0123"
                       value={formData.phone}
-                      onChange={(e) => handleInputChange('phone', e.target.value)}
+                      onChange={(e) => setFormData(prev => ({ ...prev, phone: e.target.value }))}
                       required
                     />
                   </div>
+                </div>
+              </div>
+
+              {/* Constraints (stored in staff.constraints JSONB) */}
+              <div className="space-y-4">
+                <h4 className="font-medium">Constraints</h4>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="max-hours-day">Max Hours / Day</Label>
+                    <Input
+                      id="max-hours-day"
+                      type="number"
+                      min={1}
+                      max={24}
+                      value={formData.constraints.maxHoursPerDay}
+                      onChange={(e) => setFormData(prev => ({
+                        ...prev,
+                        constraints: { ...prev.constraints, maxHoursPerDay: Number(e.target.value) || 0 }
+                      }))}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="max-hours-week">Max Hours / Week</Label>
+                    <Input
+                      id="max-hours-week"
+                      type="number"
+                      min={1}
+                      max={168}
+                      value={formData.constraints.maxHoursPerWeek}
+                      onChange={(e) => setFormData(prev => ({
+                        ...prev,
+                        constraints: { ...prev.constraints, maxHoursPerWeek: Number(e.target.value) || 0 }
+                      }))}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="min-hours-between">Min Hours Between Shifts</Label>
+                    <Input
+                      id="min-hours-between"
+                      type="number"
+                      min={0}
+                      max={24}
+                      value={formData.constraints.minHoursBetweenShifts}
+                      onChange={(e) => setFormData(prev => ({
+                        ...prev,
+                        constraints: { ...prev.constraints, minHoursBetweenShifts: Number(e.target.value) || 0 }
+                      }))}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Weekly Availability (days and timings) */}
+              <div className="space-y-4">
+                <h4 className="font-medium">Weekly Availability</h4>
+                <p className="text-sm text-muted-foreground">Use HH:mm-HH:mm ranges, comma-separated. Example: 09:00-12:00, 13:00-17:00</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {(['monday','tuesday','wednesday','thursday','friday','saturday','sunday'] as const).map((day) => (
+                    <div key={day} className="space-y-2">
+                      <Label htmlFor={`avail-${day}`}>{day.charAt(0).toUpperCase() + day.slice(1)}</Label>
+                      <Input
+                        id={`avail-${day}`}
+                        placeholder="09:00-17:00, 18:00-20:00"
+                        value={availabilityText[day]}
+                        onChange={(e) => setAvailabilityText(prev => ({ ...prev, [day]: e.target.value }))}
+                        onBlur={() => handleAvailabilityBlur(day)}
+                      />
+                    </div>
+                  ))}
                 </div>
               </div>
 
@@ -419,11 +471,11 @@ export default function StaffManagement() {
               <div className="space-y-4">
                 <h4 className="font-medium">Roles</h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {business?.roles.map(role => (
+                  {roles.map(role => (
                     <div key={role.id} className="flex items-center space-x-2">
                       <Checkbox
                         id={`role-${role.id}`}
-                        checked={formData.roles?.includes(role.id)}
+                        checked={formData.roles.includes(role.id)}
                         onCheckedChange={(checked) => handleRoleToggle(role.id, checked as boolean)}
                       />
                       <Label htmlFor={`role-${role.id}`} className="flex-1">
@@ -433,7 +485,7 @@ export default function StaffManagement() {
                             style={{ backgroundColor: role.color }}
                           />
                           <span>{role.name}</span>
-                          <span className="text-sm text-muted-foreground">(${role.hourlyRate}/hr)</span>
+                          <span className="text-sm text-muted-foreground">(${role.hourly_rate}/hr)</span>
                         </div>
                       </Label>
                     </div>
@@ -441,115 +493,14 @@ export default function StaffManagement() {
                 </div>
               </div>
 
-              {/* Availability */}
-              <div className="space-y-4">
-                <h4 className="font-medium">Availability</h4>
-                <div className="space-y-4">
-                  {weekDays.map(day => (
-                    <div key={day} className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <Label className="font-medium capitalize">{day}</Label>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => addTimeSlot(day)}
-                        >
-                          <Plus className="h-3 w-3 mr-1" />
-                          Add Time
-                        </Button>
-                      </div>
-                      
-                      {formData.availability![day]?.map((slot, index) => (
-                        <div key={index} className="flex items-center space-x-2">
-                          <Input
-                            type="time"
-                            value={slot.startTime}
-                            onChange={(e) => updateTimeSlot(day, index, 'startTime', e.target.value)}
-                            className="w-32"
-                          />
-                          <span className="text-muted-foreground">to</span>
-                          <Input
-                            type="time"
-                            value={slot.endTime}
-                            onChange={(e) => updateTimeSlot(day, index, 'endTime', e.target.value)}
-                            className="w-32"
-                          />
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => removeTimeSlot(day, index)}
-                            className="text-destructive hover:text-destructive"
-                          >
-                            <Trash2 className="h-3 w-3" />
-                          </Button>
-                        </div>
-                      ))}
-                      
-                      {(!formData.availability![day] || formData.availability![day].length === 0) && (
-                        <p className="text-sm text-muted-foreground">Not available</p>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Constraints */}
-              <div className="space-y-4">
-                <h4 className="font-medium">Work Constraints</h4>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="max-hours-day">Max Hours Per Day</Label>
-                    <Input
-                      id="max-hours-day"
-                      type="number"
-                      min="1"
-                      max="12"
-                      value={formData.constraints?.maxHoursPerDay}
-                      onChange={(e) => handleInputChange('constraints', {
-                        ...formData.constraints!,
-                        maxHoursPerDay: parseInt(e.target.value) || 8
-                      })}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="max-hours-week">Max Hours Per Week</Label>
-                    <Input
-                      id="max-hours-week"
-                      type="number"
-                      min="1"
-                      max="60"
-                      value={formData.constraints?.maxHoursPerWeek}
-                      onChange={(e) => handleInputChange('constraints', {
-                        ...formData.constraints!,
-                        maxHoursPerWeek: parseInt(e.target.value) || 40
-                      })}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="min-hours-between">Min Hours Between Shifts</Label>
-                    <Input
-                      id="min-hours-between"
-                      type="number"
-                      min="0"
-                      max="24"
-                      value={formData.constraints?.minHoursBetweenShifts}
-                      onChange={(e) => handleInputChange('constraints', {
-                        ...formData.constraints!,
-                        minHoursBetweenShifts: parseInt(e.target.value) || 12
-                      })}
-                    />
-                  </div>
-                </div>
-              </div>
+              
 
               <div className="flex justify-end space-x-4">
                 <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>
                   Cancel
                 </Button>
-                <Button type="submit" variant="gradient">
-                  {editingStaff ? 'Update Staff' : 'Add Staff'}
+                <Button type="submit" variant="gradient" disabled={loading}>
+                  {loading ? 'Saving...' : editingStaff ? 'Update Staff' : 'Add Staff'}
                 </Button>
               </div>
             </form>

@@ -9,36 +9,36 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { useApp } from '@/contexts/AppContext';
+import { useAuth } from '@/hooks/useAuth';
+import { useBusiness } from '@/hooks/useBusiness';
 import { useNavigate } from 'react-router-dom';
 
 export function Header() {
-  const { state, dispatch } = useApp();
+  const { user, signOut } = useAuth();
+  const { business } = useBusiness();
   const navigate = useNavigate();
 
-  const handleLogout = () => {
-    dispatch({ type: 'SET_CURRENT_USER', payload: null });
-    navigate('/login');
+  const handleLogout = async () => {
+    await signOut();
+    navigate('/auth');
   };
 
   const getUserInitials = () => {
-    if (state.currentUser?.role === 'OWNER') {
-      return state.business?.name?.charAt(0).toUpperCase() || 'O';
+    if (business?.name) {
+      return business.name.charAt(0).toUpperCase();
     }
-    if (state.currentUser?.staffId) {
-      const staff = state.staff.find(s => s.id === state.currentUser?.staffId);
-      return staff?.name?.charAt(0).toUpperCase() || 'S';
+    if (user?.email) {
+      return user.email.charAt(0).toUpperCase();
     }
     return 'U';
   };
 
   const getUserDisplayName = () => {
-    if (state.currentUser?.role === 'OWNER') {
-      return state.business?.name || 'Business Owner';
+    if (business?.name) {
+      return business.name;
     }
-    if (state.currentUser?.staffId) {
-      const staff = state.staff.find(s => s.id === state.currentUser?.staffId);
-      return staff?.name || 'Staff Member';
+    if (user?.email) {
+      return user.email.split('@')[0];
     }
     return 'User';
   };
@@ -55,11 +55,11 @@ export function Header() {
               ShiftAI
             </h1>
           </div>
-          {state.business && (
+          {business && (
             <div className="hidden md:block">
               <span className="text-sm text-muted-foreground">•</span>
               <span className="ml-2 text-sm font-medium text-foreground">
-                {state.business.name}
+                {business.name}
               </span>
             </div>
           )}

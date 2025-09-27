@@ -98,15 +98,18 @@ export interface Shift {
 }
 
 export interface TimeOffRequest {
-  id: string;
+  id?: string;
   staffId: string;
   startDate: Date;
   endDate: Date;
-  reason: string;
+  reason?: string;
   status: RequestStatus;
-  createdAt: Date;
+  createdAt?: Date;
   reviewedAt?: Date;
   reviewedBy?: string;
+  isPartialDay?: boolean;
+  startTime?: string | null;
+  endTime?: string | null;
 }
 
 export interface AIScheduleRequest {
